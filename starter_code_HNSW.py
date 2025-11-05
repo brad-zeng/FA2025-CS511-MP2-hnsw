@@ -6,6 +6,7 @@ import requests
 import time
 import matplotlib.pyplot as plt
 import math
+import csv
 
 def evaluate_hnsw():
     base_url = "http://ann-benchmarks.com/sift-128-euclidean.hdf5"
@@ -236,7 +237,7 @@ def plot_part2(results):
     
 def part3_latency_vs_recall():
     """
-    Compare HNSW vs DiskANN on SIFT1M (or any HDF5 dataset).
+    Compare HNSW vs DiskANN on SIFT1M.
     Measures average query latency and 1-Recall@1.
     """
     dataset_url = "http://ann-benchmarks.com/sift-128-euclidean.hdf5"
@@ -277,18 +278,28 @@ def part3_latency_vs_recall():
             print(f"HNSW M={M}, efSearch={ef} -> Recall={recall:.4f}, Latency={latency:.2f}ms")
 
     # --- Save HNSW results ---
-    np.save("hnsw_results.npy", np.array(hnsw_results))
+    np.save("hnsw_results.npy", np.array(hnsw_results, dtype=object))
 
-    # --- Load DiskANN results if available ---
-    try:
-        diskann_results = np.load("diskann_results.npy", allow_pickle=True)
-        print("Loaded DiskANN results.")
-    except FileNotFoundError:
-        diskann_results = []
-        print("No DiskANN results found; only plotting HNSW.")
+    # --- Load DiskANN results from CSV ---
+    diskann_results = []
+    csv_path = "diskann_results.csv"
+    if os.path.exists(csv_path):
+        with open(csv_path, 'r') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                # Assuming CSV columns: R, L, recall, latency
+                R = int(row[0])
+                L = int(row[1])
+                recall = float(row[2])
+                latency = float(row[3])
+                diskann_results.append((R, L, recall, latency))
+        print("Loaded DiskANN results from CSV.")
+    else:
+        print("No DiskANN CSV found; only plotting HNSW.")
 
     # --- Plot ---
     plt.figure(figsize=(8,6))
+
     # HNSW
     for M in M_list:
         subset = [r for r in hnsw_results if r[0]==M]
