@@ -13,6 +13,7 @@ def run_diskann(train, test, neighbors, csv_file="diskann_results.csv"):
     """
 
     d = train.shape[1]
+    n = train.shape[0]
 
     # Parameters to vary
     R_list = [8, 16]          # graph degree (neighbors per node)
@@ -22,18 +23,25 @@ def run_diskann(train, test, neighbors, csv_file="diskann_results.csv"):
 
     for R in R_list:
         # Create in-memory index
-        index = da.MemoryIndex(d, metric='L2')  # use 'Angular' if needed
+        # Parameters: dimension, metric, max_points, graph_degree, max_occlusion_size, alpha, num_threads
+        index = da.DynamicMemoryIndex(
+            distance_metric='l2',
+            vector_dtype=np.float32,
+            dim=d,
+            max_vectors=n,
+            complexity=R,  # graph degree
+            graph_degree=R
+        )
 
-        # Add train vectors
-        index.add(train)
-
-        # Build index
-        index.build(R=R)  # R=graph degree
+        # Batch insert train vectors
+        tags = np.arange(n, dtype=np.uint32)
+        index.batch_insert(train, tags, num_threads=4)
 
         for L in L_list:
             start = time.time()
             # Search test vectors
-            indices, distances = index.search(test, k=1, L=L)
+            # Returns: (indices, distances)
+            indices, distances = index.batch_search(test, k_neighbors=1, complexity=L, num_threads=4)
             end = time.time()
 
             latency = (end - start) / len(test) * 1000  # ms per query
