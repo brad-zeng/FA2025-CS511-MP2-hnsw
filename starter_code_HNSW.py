@@ -6,7 +6,6 @@ import requests
 import time
 import matplotlib.pyplot as plt
 import math
-import diskann_pybind as da
 
 def evaluate_hnsw():
     base_url = "http://ann-benchmarks.com/sift-128-euclidean.hdf5"
@@ -237,7 +236,7 @@ def plot_part2(results):
     
 def part3_latency_vs_recall():
     """
-    Compare HNSW vs DiskANN on SIFT1M (or any other HDF5 dataset).
+    Compare HNSW vs DiskANN on SIFT1M (or any HDF5 dataset).
     Measures average query latency and 1-Recall@1.
     """
     dataset_url = "http://ann-benchmarks.com/sift-128-euclidean.hdf5"
@@ -256,7 +255,7 @@ def part3_latency_vs_recall():
         test = f['test'][:].astype('float32')
         neighbors = f['neighbors'][:]
 
-    # --- HNSW parameters to vary ---
+    # --- HNSW parameters ---
     M_list = [16, 32]
     efSearch_list = [50, 100, 200, 400]
     hnsw_results = []
@@ -272,25 +271,23 @@ def part3_latency_vs_recall():
             start = time.time()
             D, I = index.search(test, k=1)
             end = time.time()
-            latency = (end - start) / len(test) * 1000  # ms per query
+            latency = (end - start) / len(test) * 1000  # ms/query
             recall = (I[:, 0] == neighbors[:len(I), 0]).mean()
             hnsw_results.append((M, ef, recall, latency))
             print(f"HNSW M={M}, efSearch={ef} -> Recall={recall:.4f}, Latency={latency:.2f}ms")
 
-    # --- DiskANN parameters to vary ---
-    # Note: DiskANN Python interface differs; adjust as needed
-    diskann_results = []
-    # Example pseudo-code (replace with actual DiskANN calls)
-    # R_list = [16, 32]
-    # L_list = [32, 64, 128, 256]
-    # for R in R_list:
-    #     for L in L_list:
-    #         index = da.Index(d, "disk_path", R=R)
-    #         index.build(train)
-    #         lat, rec = query_diskann(index, test, neighbors, L)
-    #         diskann_results.append((R, L, rec, lat))
+    # --- Save HNSW results ---
+    np.save("hnsw_results.npy", np.array(hnsw_results))
 
-    # --- Plot HNSW (and DiskANN if available) ---
+    # --- Load DiskANN results if available ---
+    try:
+        diskann_results = np.load("diskann_results.npy", allow_pickle=True)
+        print("Loaded DiskANN results.")
+    except FileNotFoundError:
+        diskann_results = []
+        print("No DiskANN results found; only plotting HNSW.")
+
+    # --- Plot ---
     plt.figure(figsize=(8,6))
     # HNSW
     for M in M_list:
@@ -302,9 +299,9 @@ def part3_latency_vs_recall():
         for i, ef in enumerate(ef_list):
             plt.text(1-recall[i], latency[i], f"ef={ef}", fontsize=8)
 
-    # DiskANN (pseudo)
-    # for res in diskann_results:
-    #     plt.plot(1-res[2], res[3], marker='s', label=f"DiskANN R={res[0]}, L={res[1]}")
+    # DiskANN
+    for res in diskann_results:
+        plt.plot(1-res[2], res[3], marker='s', label=f"DiskANN R={res[0]}, L={res[1]}")
 
     plt.xlabel("1-Recall@1")
     plt.ylabel("Query Latency (ms)")
@@ -313,6 +310,7 @@ def part3_latency_vs_recall():
     plt.legend()
     plt.savefig("part3_latency_vs_recall.png", dpi=300, bbox_inches='tight')
     plt.show()
+
 
 
 if __name__ == "__main__":
