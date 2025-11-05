@@ -5,6 +5,13 @@ import numpy as np
 import time
 import diskannpy as da
 import csv
+import os
+import h5py
+import requests
+import numpy as np
+import time
+import diskannpy as da
+import csv
 
 def run_diskann(train, test, neighbors, csv_file="diskann_results.csv"):
     """
@@ -22,19 +29,22 @@ def run_diskann(train, test, neighbors, csv_file="diskann_results.csv"):
     results = []
 
     for R in R_list:
+        # Complexity can be set higher than graph degree
+        complexity = max(2*R, 16)
+
         # Create in-memory index
-        # Parameters: dimension, metric, max_points, graph_degree, max_occlusion_size, alpha, num_threads
+        # Parameters: dimension, metric, max_points, graph_degree, complexity
         index = da.DynamicMemoryIndex(
             distance_metric='l2',
             vector_dtype=np.float32,
             dimensions=d,
             max_vectors=n,
-            complexity=R,  # graph degree
-            graph_degree=R
+            graph_degree=R,
+            complexity=complexity
         )
 
         # Batch insert train vectors
-        # Note: tag 0 is reserved by DiskANN, so start from 1
+        # DiskANN tags start at 1
         tags = np.arange(1, n+1, dtype=np.uint32)
         index.batch_insert(train, tags, num_threads=4)
 
@@ -46,7 +56,8 @@ def run_diskann(train, test, neighbors, csv_file="diskann_results.csv"):
             end = time.time()
 
             latency = (end - start) / len(test) * 1000  # ms per query
-            recall = (indices[:, 0] == neighbors[:len(indices), 0]).mean()
+            # Subtract 1 from indices to match 0-based neighbors
+            recall = ((indices[:, 0] - 1) == neighbors[:len(indices), 0]).mean()
 
             results.append((R, L, recall, latency))
             print(f"DiskANN R={R}, L={L} -> Recall@1={recall:.4f}, Latency={latency:.2f}ms")
@@ -60,6 +71,7 @@ def run_diskann(train, test, neighbors, csv_file="diskann_results.csv"):
 
     print(f"DiskANN results saved to {csv_file}")
     return results
+
 
 
 def download_sift1m(file_path="sift1m.hdf5"):
