@@ -5,6 +5,8 @@ import os
 import requests
 import time
 import matplotlib.pyplot as plt
+import math
+import diskann_pybind as da
 
 def evaluate_hnsw():
     base_url = "http://ann-benchmarks.com/sift-128-euclidean.hdf5"
@@ -23,14 +25,16 @@ def evaluate_hnsw():
         test_data = f['test'][:].astype('float32')
         neighbors = f['neighbors'][:]
     
-    part0(train_data, test_data)
+    # part0(train_data, test_data)
     # print("===== part 1 =====")
     # hsnw_results = part1_hsnw(train_data, test_data, neighbors)
     # lsh_results = part1_lsh(train_data, test_data, neighbors)
     # plot_part1(hsnw_results, lsh_results)
-
     # print("===== part 2 =====")
     # part2_scalability()
+    print("===== part 3 =====")
+    part3_latency_vs_recall()
+
 
 
 def part0(train_data, test_data):
@@ -126,18 +130,15 @@ def part2_scalability():
         1. QPS vs Recall (one curve per dataset)
         2. Index Build Time vs Recall
     """
-    # === Fill these in manually ===
     datasets = {
-        "MNIST": "http://ann-benchmarks.com/mnist-784-euclidean.hdf5",
-        "COCO-I2I": "https://github.com/fabiocarrara/str-encoders/releases/download/v0.1.3/coco-i2i-512-angular.hdf5",
-        "NYTimes": "http://ann-benchmarks.com/nytimes-256-angular.hdf5",
-        "SIFT1M": "http://ann-benchmarks.com/sift-128-euclidean.hdf5",
+        "MNIST": "http://ann-benchmarks.com/mnist-784-euclidean.hdf5", #60,000
+        "COCO-I2I": "https://github.com/fabiocarrara/str-encoders/releases/download/v0.1.3/coco-i2i-512-angular.hdf5", #113,287
+        "Last.fm": "http://ann-benchmarks.com/lastfm-64-dot.hdf5", #292,385
+        # "SIFT1M": "http://ann-benchmarks.com/sift-128-euclidean.hdf5", #1M
+        "GloVe": "http://ann-benchmarks.com/glove-50-angular.hdf5", #1,183,514	
     }
 
     M_values = [4, 8, 12, 24, 48]
-    efConstruction = 200
-    efSearch = 100  # fixed for fairness
-
     results = []
 
     for name, url in datasets.items():
@@ -155,10 +156,16 @@ def part2_scalability():
             train = f['train'][:].astype('float32')
             test = f['test'][:].astype('float32')
             neighbors = f['neighbors'][:]
-
+        n = train.shape[0]
+        
         d = train.shape[1]
-        print(f"\nDataset: {name} (train={train.shape[0]}, dim={d})")
-
+        efConstruction = int(50 * math.log(n, 10))
+        if d >= 512:
+            efConstruction *= 2
+        elif d >= 128:
+            efConstruction = int(efConstruction * 1.5)
+        print(f"\nDataset: {name} (train={n}, dim={d}, efConstruction = {efConstruction})")
+            
         for M in M_values:
             print(f"Building HNSW index (M={M})...")
             index = faiss.IndexHNSWFlat(d, M)
@@ -167,7 +174,7 @@ def part2_scalability():
             index.add(train)
             build_time = time.time() - start_build
 
-            index.hnsw.efSearch = efSearch
+            index.hnsw.efSearch = efConstruction // 2
 
             start_query = time.time()
             D, I = index.search(test, k=1)
@@ -227,6 +234,86 @@ def plot_part2(results):
     plt.grid(True)
     plt.savefig("part2_buildtime_vs_recall.png", dpi=300, bbox_inches='tight')
     plt.show()
+    
+def part3_latency_vs_recall():
+    """
+    Compare HNSW vs DiskANN on SIFT1M (or any other HDF5 dataset).
+    Measures average query latency and 1-Recall@1.
+    """
+    dataset_url = "http://ann-benchmarks.com/sift-128-euclidean.hdf5"
+    file_path = "sift1m.hdf5"
+    if not os.path.exists(file_path):
+        print("Downloading SIFT1M dataset...")
+        r = requests.get(dataset_url, stream=True)
+        with open(file_path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024*1024):
+                if chunk:
+                    f.write(chunk)
+        print("Download completed.")
+
+    with h5py.File(file_path, 'r') as f:
+        train = f['train'][:].astype('float32')
+        test = f['test'][:].astype('float32')
+        neighbors = f['neighbors'][:]
+
+    # --- HNSW parameters to vary ---
+    M_list = [16, 32]
+    efSearch_list = [50, 100, 200, 400]
+    hnsw_results = []
+
+    d = train.shape[1]
+    for M in M_list:
+        index = faiss.IndexHNSWFlat(d, M)
+        efConstruction = int(50 * math.log(train.shape[0], 10))
+        index.hnsw.efConstruction = efConstruction
+        index.add(train)
+        for ef in efSearch_list:
+            index.hnsw.efSearch = ef
+            start = time.time()
+            D, I = index.search(test, k=1)
+            end = time.time()
+            latency = (end - start) / len(test) * 1000  # ms per query
+            recall = (I[:, 0] == neighbors[:len(I), 0]).mean()
+            hnsw_results.append((M, ef, recall, latency))
+            print(f"HNSW M={M}, efSearch={ef} -> Recall={recall:.4f}, Latency={latency:.2f}ms")
+
+    # --- DiskANN parameters to vary ---
+    # Note: DiskANN Python interface differs; adjust as needed
+    diskann_results = []
+    # Example pseudo-code (replace with actual DiskANN calls)
+    # R_list = [16, 32]
+    # L_list = [32, 64, 128, 256]
+    # for R in R_list:
+    #     for L in L_list:
+    #         index = da.Index(d, "disk_path", R=R)
+    #         index.build(train)
+    #         lat, rec = query_diskann(index, test, neighbors, L)
+    #         diskann_results.append((R, L, rec, lat))
+
+    # --- Plot HNSW (and DiskANN if available) ---
+    plt.figure(figsize=(8,6))
+    # HNSW
+    for M in M_list:
+        subset = [r for r in hnsw_results if r[0]==M]
+        recall = [r[2] for r in subset]
+        latency = [r[3] for r in subset]
+        ef_list = [r[1] for r in subset]
+        plt.plot(1-np.array(recall), latency, marker='o', label=f"HNSW M={M}")
+        for i, ef in enumerate(ef_list):
+            plt.text(1-recall[i], latency[i], f"ef={ef}", fontsize=8)
+
+    # DiskANN (pseudo)
+    # for res in diskann_results:
+    #     plt.plot(1-res[2], res[3], marker='s', label=f"DiskANN R={res[0]}, L={res[1]}")
+
+    plt.xlabel("1-Recall@1")
+    plt.ylabel("Query Latency (ms)")
+    plt.title("Latency vs Recall: HNSW vs DiskANN")
+    plt.grid(True)
+    plt.legend()
+    plt.savefig("part3_latency_vs_recall.png", dpi=300, bbox_inches='tight')
+    plt.show()
+
 
 if __name__ == "__main__":
     evaluate_hnsw()
