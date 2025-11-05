@@ -3,9 +3,21 @@ import numpy as np
 import h5py
 import os
 import time
-import diskann_pybind as da
+import diskannpy as da
+import requests
 
 def load_dataset(file_path):
+    dataset_url = "http://ann-benchmarks.com/sift-128-euclidean.hdf5"
+    file_path = "sift1m.hdf5"
+    if not os.path.exists(file_path):
+        print("Downloading SIFT1M dataset...")
+        r = requests.get(dataset_url, stream=True)
+        with open(file_path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=1024*1024):
+                if chunk:
+                    f.write(chunk)
+        print("Download completed.")
+
     with h5py.File(file_path, 'r') as f:
         train = f['train'][:].astype('float32')
         test = f['test'][:].astype('float32')
