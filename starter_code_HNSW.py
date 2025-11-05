@@ -33,7 +33,8 @@ def evaluate_hnsw():
     # print("===== part 2 =====")
     # part2_scalability()
     print("===== part 3 =====")
-    part3_latency_vs_recall()
+    # part3_latency_vs_recall()
+    part3_graph("hnsw_results.npy", "diskann_results.csv")
 
 
 
@@ -280,12 +281,14 @@ def part3_latency_vs_recall():
     # --- Save HNSW results ---
     np.save("hnsw_results.npy", np.array(hnsw_results, dtype=object))
 
+def part3_graph(hnsw_results_path, diskann_results_path):
     # --- Load DiskANN results from CSV ---
     diskann_results = []
-    csv_path = "diskann_results.csv"
-    if os.path.exists(csv_path):
-        with open(csv_path, 'r') as f:
+    M_list = [16, 32]
+    if os.path.exists(diskann_results_path):
+        with open(diskann_results_path, 'r') as f:
             reader = csv.reader(f)
+            next(reader)
             for row in reader:
                 # Assuming CSV columns: R, L, recall, latency
                 R = int(row[0])
@@ -301,6 +304,7 @@ def part3_latency_vs_recall():
     plt.figure(figsize=(8,6))
 
     # HNSW
+    hnsw_results = np.load("hnsw_results.npy", allow_pickle=True)
     for M in M_list:
         subset = [r for r in hnsw_results if r[0]==M]
         recall = [r[2] for r in subset]

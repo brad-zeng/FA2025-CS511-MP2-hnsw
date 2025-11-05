@@ -34,7 +34,8 @@ def run_diskann(train, test, neighbors, csv_file="diskann_results.csv"):
         )
 
         # Batch insert train vectors
-        tags = np.arange(n, dtype=np.uint32)
+        # Note: tag 0 is reserved by DiskANN, so start from 1
+        tags = np.arange(1, n+1, dtype=np.uint32)
         index.batch_insert(train, tags, num_threads=4)
 
         for L in L_list:
